@@ -2,6 +2,8 @@
 import fs from 'fs';
 import path from 'path';
 
+import { InvoiceStatus, InvoiceStateMachine } from './invoice-state';
+
 // Types based on the User Request
 export interface Invoice {
   invoiceId: string;
@@ -11,11 +13,12 @@ export interface Invoice {
   amount: string;
   currency: string;
   network: string;
-  status: 'PENDING' | 'CONFIRMED' | 'PAID' | 'FAILED' | 'EXPIRED';
+  status: InvoiceStatus;
   createdAt: string;
   expiresAt: string;
   txHash: string | null;
   paymentAddress: string; // From ForumPay
+  lastIngestedEventId?: string;
 }
 
 const DB_PATH = path.join(process.cwd(), 'invoices_db.json');
@@ -54,7 +57,7 @@ export const InvoiceRepository = {
     writeDb(invoices);
   },
 
-  updateStatus: async (invoiceId: string, status: Invoice['status'], txHash?: string): Promise<void> => {
+  updateStatus: async (invoiceId: string, status: InvoiceStatus, txHash?: string, eventId?: string): Promise<void> => {
     const invoices = readDb();
     const index = invoices.findIndex(i => i.invoiceId === invoiceId);
     if (index === -1) {
@@ -62,16 +65,26 @@ export const InvoiceRepository = {
     }
 
     const current = invoices[index];
-    // Rule: Invoice becomes immutable once PAID
-    if (current.status === 'PAID') {
-       console.warn(`Attempt to update PAID invoice ${invoiceId} ignored.`);
-       return;
+    
+    // Idempotency Check
+    if (eventId && current.lastIngestedEventId === eventId) {
+        console.log(`Event ${eventId} already processed for invoice ${invoiceId}`);
+        return;
+    }
+
+    // Validate transition using State Machine
+    try {
+        InvoiceStateMachine.validateTransition(current.status, status);
+    } catch (e: any) {
+        console.error(`State transition error for invoice ${invoiceId}: ${e.message}`);
+        throw e;
     }
 
     invoices[index] = {
       ...current,
       status,
-      txHash: txHash || current.txHash
+      txHash: txHash || current.txHash,
+      lastIngestedEventId: eventId || current.lastIngestedEventId
     };
     writeDb(invoices);
   },
@@ -85,5 +98,10 @@ export const InvoiceRepository = {
   findByOrderId: async (orderId: string): Promise<Invoice | null> => {
       const invoices = readDb();
       return invoices.find(i => i.orderId === orderId) || null;
+  },
+
+  findPending: async (): Promise<Invoice[]> => {
+      const invoices = readDb();
+      return invoices.filter(i => i.status === InvoiceStatus.PENDING || i.status === InvoiceStatus.DETECTED);
   }
 };

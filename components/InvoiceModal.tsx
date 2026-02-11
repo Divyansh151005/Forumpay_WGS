@@ -5,6 +5,8 @@ import { useState, useEffect } from 'react';
 import { WGSWallet } from '@/lib/wgs-wallet-stub';
 import { Copy, Check, Clock, ShieldCheck, X, AlertTriangle } from 'lucide-react';
 
+import { QRCodeSVG } from 'qrcode.react';
+
 interface InvoiceModalProps {
     invoice: any;
     onClose: () => void;
@@ -22,9 +24,17 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
         if (status === 'PAID' || status === 'FAILED') return;
 
         const interval = setInterval(async () => {
-            // In a real app we would have a GET endpoint
-            // simulating poll... logic handled in UI for state transistion after signing
-        }, 5000);
+            try {
+                const res = await fetch(`/api/invoice/${invoice.invoiceId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.status !== status) {
+                        setStatus(data.status);
+                        if (data.txHash) setTxHash(data.txHash);
+                    }
+                }
+            } catch (ignore) {}
+        }, 3000);
 
         // Timer
         const timer = setInterval(() => {
@@ -32,7 +42,7 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
         }, 1000);
 
         return () => { clearInterval(interval); clearInterval(timer); };
-    }, [status]);
+    }, [status, invoice.invoiceId]);
 
     const handleCopy = () => {
         navigator.clipboard.writeText(invoice.paymentAddress);
@@ -45,26 +55,30 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
         try {
             const { signer } = await WGSWallet.connect();
             // 4. Trigger WGS Signing Key
-            const tx = await WGSWallet.sendPayment(signer, invoice.paymentAddress, invoice.amount, invoice.currency);
+            const tx = await WGSWallet.sendPayment(signer, invoice.paymentAddress, invoice.amount, invoice.currency, invoice.network);
 
             // Optimistic Update
             console.log("Transaction sent:", tx.hash);
             setTxHash(tx.hash);
-
-            // Simulate Webhook confirming it shortly after
-            setTimeout(async () => {
-                // Trigger webhook manually for demo since we don't have ForumPay calling us back
-                await fetch('/api/forumpay/webhook', {
-                    method: 'POST',
-                    body: JSON.stringify({
-                        payment_id: invoice.invoiceId,
-                        status: 'confirmed',
-                        tx_hash: tx.hash
-                    })
-                });
-                setStatus('PAID');
-            }, 3000);
-
+            // We rely on polling for final status, but we can set to Processing/Detected if we had that state exposed in UI
+            // For now, let's just wait for poll to pick up 'PAID' or 'CONFIRMED' from backend (simulated)
+            
+            // In a real app the webhook would come from ForumPay > Backend > DB > Poll updates Status
+            // For this demo, we can simulate the webhook call if we want, OR just rely on the Manual Verification steps
+            // Let's assume the user will use the "Simulate Webhook" script or we trigger it here for convenience?
+            // User requirement: "Reconciliation Job ... Finds invoices stuck in PENDING"
+            // Let's not simulate webhook here to force "Real Adapter" usage or manual trigger, 
+            // BUT for the "Demo" experience we might want to auto-trigger it.
+            // Actually, the previous code simulated webhook. Let's keep a simulation for the "Happy Path" demo 
+            // but effectively we should rely on the backend.
+            
+            // To be "Production Ready", the frontend shouldn't fake the webhook.
+            // But we can call checkStatus on the backend? 
+            // The backend doesn't have a "force check" endpoint, only "get status".
+            // Let's just mock the 'PAID' transition locally for immediate feedback if it succeeds?
+            // No, that violates "Single Source of Truth".
+            // We will just let polling handle it.
+            
         } catch (error) {
             console.error("Signing failed:", error);
             alert("Payment cancelled or failed");
@@ -78,6 +92,8 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
         const s = seconds % 60;
         return `${m}:${s.toString().padStart(2, '0')}`;
     };
+
+    const paymentURI = WGSWallet.getPaymentURI(invoice.paymentAddress, invoice.amount, invoice.currency, invoice.network);
 
     return (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -110,10 +126,15 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                             <div className="text-2xl font-bold font-mono">{invoice.amount} {invoice.currency}</div>
                         </div>
 
+                        <div className="flex flex-col items-center mb-6 p-4 bg-white rounded-lg">
+                            <QRCodeSVG value={paymentURI} size={180} />
+                            <p className="text-black text-xs mt-2 font-mono">Scan to Pay</p>
+                        </div>
+
                         <div className="space-y-4 mb-6">
                             <div>
                                 <div className="text-xs text-gray-500 mb-1 flex justify-between">
-                                    <span>Payment Address (ERC-20)</span>
+                                    <span>Payment Address ({invoice.network} / {invoice.currency})</span>
                                     <span className="flex items-center gap-1 text-orange-400"><Clock size={12} /> {formatTime(timeLeft)}</span>
                                 </div>
                                 <div className="flex gap-2">
@@ -127,9 +148,11 @@ export default function InvoiceModal({ invoice, onClose }: InvoiceModalProps) {
                             </div>
                         </div>
 
-                        {status === 'CONFIRMED' ? (
+                        {status === 'CONFIRMED' || status === 'DETECTED' ? (
                             <div className="text-center py-4 animate-pulse">
-                                <p className="text-success font-semibold">Confirming Transaction...</p>
+                                <p className="text-success font-semibold">
+                                    {status === 'DETECTED' ? 'Payment Detected...' : 'Confirming Transaction...'}
+                                </p>
                             </div>
                         ) : (
                             <button

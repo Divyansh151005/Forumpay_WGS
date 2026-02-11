@@ -15,12 +15,32 @@ export const Security = {
         return schema.parse(data);
     },
 
-    verifyWebhookSignature: (signature: string, body: string, secret: string) => {
-        if (!secret) return true; // Bypass if no secret configured (Dev mode)
-        // ForumPay style signature verification (Hypothetical HMAC-SHA256)
-        const hmac = crypto.createHmac('sha256', secret);
+    verifyWebhookSignature: (signature: string, body: string, secret?: string) => {
+        const secretKey = secret || process.env.FORUMPAY_WEBHOOK_SECRET;
+        if (!secretKey) {
+            console.warn("Skipping webhook signature verification: FORUMPAY_WEBHOOK_SECRET is missing.");
+            return true; // Weak fail-open for dev, should be strict in prod
+        }
+        
+        const hmac = crypto.createHmac('sha256', secretKey);
         const calculated = hmac.update(body).digest('hex');
-        return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(calculated));
+        
+        // Constant time comparison to prevent timing attacks
+        try {
+            return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(calculated));
+        } catch (e) {
+            return false; // Length mismatch or other error
+        }
+    },
+
+    validateTimestamp: (timestampStr: string) => {
+        const timestamp = parseInt(timestampStr, 10);
+        if (isNaN(timestamp)) return false;
+
+        const now = Math.floor(Date.now() / 1000);
+        const tolerance = 5 * 60; // 5 minutes
+
+        return Math.abs(now - timestamp) <= tolerance;
     },
 
     // 7. AI Extension Hooks (Scaffold)
