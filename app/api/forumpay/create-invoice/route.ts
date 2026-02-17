@@ -4,10 +4,16 @@ import { InvoiceRepository } from '@/lib/db';
 import { Security } from '@/lib/security';
 import { forumPayClient } from '@/lib/forumpay/client';
 import { InvoiceStatus } from '@/lib/invoice-state';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
     try {
         const body = await request.json();
+
+        // 0. Rate Limiting
+        if (!rateLimit(request as any, 'create-invoice')) {
+            return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
+        }
 
         // 1. Validation & Security Checks
         const validatedData = Security.validateInvoiceRequest(body);

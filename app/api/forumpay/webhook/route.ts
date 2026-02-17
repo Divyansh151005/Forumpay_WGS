@@ -3,9 +3,15 @@ import { NextResponse } from 'next/server';
 import { InvoiceRepository } from '@/lib/db';
 import { Security } from '@/lib/security';
 import { InvoiceStatus } from '@/lib/invoice-state';
+import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
     try {
+        // 0. Rate Limiting
+        if (!rateLimit(request as any, 'webhook')) {
+            return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
+        }
+
         const rawBody = await request.text();
         const signature = request.headers.get('x-forumpay-signature') || '';
         const timestamp = request.headers.get('x-forumpay-timestamp') || '';
@@ -30,7 +36,7 @@ export async function POST(request: Request) {
         const eventId = body.event_id || `${payment_id}:${status}`;
 
         // 3. Map Status
-        
+
         // Mapping ForumPay status to our InvoiceStatus
         let newStatus: InvoiceStatus | null = null;
 
@@ -38,7 +44,7 @@ export async function POST(request: Request) {
             case 'waiting':
                 newStatus = InvoiceStatus.PENDING;
                 break;
-            case 'processing': 
+            case 'processing':
             case 'confirming':
                 newStatus = InvoiceStatus.DETECTED;
                 break;

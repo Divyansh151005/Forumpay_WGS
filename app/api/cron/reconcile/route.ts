@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 import { InvoiceRepository } from '@/lib/db';
 import { forumPayClient } from '@/lib/forumpay/client';
 import { InvoiceStatus } from '@/lib/invoice-state';
+import { rateLimit } from '@/lib/rate-limit';
 
 export const dynamic = 'force-dynamic'; // Ensure not cached
 
@@ -12,19 +13,24 @@ export async function GET(request: Request) {
         // const authHeader = request.headers.get('authorization');
         // if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) { return new Response('Unauthorized', { status: 401 }); }
 
+        // 0. Rate Limiting
+        if (!rateLimit(request as any, 'reconcile')) {
+            return NextResponse.json({ error: 'Too Many Requests' }, { status: 429 });
+        }
+
         const pendingInvoices = await InvoiceRepository.findPending();
         console.log(`[Reconcile] Found ${pendingInvoices.length} pending invoices.`);
 
         const results = await Promise.allSettled(pendingInvoices.map(async (invoice) => {
             try {
                 const fpData = await forumPayClient.checkStatus(invoice.invoiceId);
-                
+
                 let newStatus: InvoiceStatus | null = null;
                 switch (fpData.status) {
                     case 'waiting':
                         newStatus = InvoiceStatus.PENDING;
                         break;
-                    case 'processing': 
+                    case 'processing':
                     case 'confirming':
                         newStatus = InvoiceStatus.DETECTED;
                         break;
