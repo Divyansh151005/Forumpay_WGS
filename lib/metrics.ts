@@ -4,7 +4,12 @@ type MetricName =
     | 'webhook_invalid_signature_total'
     | 'reconciliation_fixed_total'
     | 'rpc_failure_total'
-    | 'db_error_total';
+    | 'db_error_total'
+    | 'invoice_transition_created'
+    | 'invoice_transition_processor_pending'
+    | 'invoice_transition_paid'
+    | 'invoice_transition_expired'
+    | 'invoice_transition_failed';
 
 class MetricsRegistry {
     private counters: Map<MetricName, number> = new Map();
@@ -39,6 +44,11 @@ class MetricsRegistry {
         this.counters.set('reconciliation_fixed_total', 0);
         this.counters.set('rpc_failure_total', 0);
         this.counters.set('db_error_total', 0);
+        this.counters.set('invoice_transition_created', 0);
+        this.counters.set('invoice_transition_processor_pending', 0);
+        this.counters.set('invoice_transition_paid', 0);
+        this.counters.set('invoice_transition_expired', 0);
+        this.counters.set('invoice_transition_failed', 0);
     }
 }
 

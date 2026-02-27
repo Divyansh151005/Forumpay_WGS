@@ -1,6 +1,8 @@
 
 import { NextResponse } from 'next/server';
-import { InvoiceRepository } from '@/lib/db';
+import { DynamoDBInvoiceRepository } from '@/infrastructure/persistence/DynamoDBInvoiceRepository';
+
+const repository = new DynamoDBInvoiceRepository();
 
 export async function GET(request: Request, context: { params: Promise<{ invoiceId: string }> }) {
     try {
@@ -10,18 +12,20 @@ export async function GET(request: Request, context: { params: Promise<{ invoice
             return NextResponse.json({ error: 'Invoice ID is required' }, { status: 400 });
         }
 
-        const invoice = await InvoiceRepository.findById(invoiceId);
+        const invoice = await repository.findById(invoiceId);
 
         if (!invoice) {
             return NextResponse.json({ error: 'Invoice not found' }, { status: 404 });
         }
 
+        const data = invoice.toJSON();
+
         return NextResponse.json({
-            status: invoice.status,
-            amount: invoice.amount,
-            currency: invoice.currency,
-            network: invoice.network,
-            txHash: invoice.txHash
+            status: data.status,
+            amount: data.amount,
+            currency: data.currency,
+            network: data.network,
+            txHash: data.txHash
         });
 
     } catch (error) {

@@ -1,9 +1,7 @@
 
 import { NextResponse } from 'next/server';
-import { InvoiceRepository } from '@/lib/db';
+import { invoiceService } from '@/lib/services';
 import { Security } from '@/lib/security';
-import { forumPayClient } from '@/lib/forumpay/client';
-import { InvoiceStatus } from '@/lib/invoice-state';
 import { rateLimit } from '@/lib/rate-limit';
 
 export async function POST(request: Request) {
@@ -21,33 +19,17 @@ export async function POST(request: Request) {
         // 2. AI Risk Check (Non-blocking)
         Security.aiRiskScore(validatedData.walletAddress, validatedData.amount);
 
-        // 3. Call ForumPay API via Adapter
-        const paymentData = await forumPayClient.startPayment({
-            amount: validatedData.amount,
-            currency: validatedData.currency,
-            orderId: validatedData.orderId,
-            payerId: validatedData.userId
-        });
-
-        // 4. Persistence
-        const newInvoice = {
-            invoiceId: paymentData.payment_id,
-            orderId: validatedData.orderId,
-            userId: validatedData.userId,
+        // 3. Orchestrate Invoice Creation via Service
+        const invoice = await invoiceService.createInvoice({
+            merchantId: 'WGS_MERCHANT', // Default or from context
+            payerUserId: validatedData.userId,
             walletAddress: validatedData.walletAddress,
             amount: validatedData.amount,
             currency: validatedData.currency,
-            network: 'ETH', // Defaulting for demo, could be extracted from request if needed
-            status: InvoiceStatus.PENDING,
-            createdAt: new Date().toISOString(),
-            expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(), // 15 mins
-            txHash: null,
-            paymentAddress: paymentData.address
-        };
+            network: 'ETH' // Default, should be configurable
+        });
 
-        await InvoiceRepository.save(newInvoice);
-
-        return NextResponse.json(newInvoice);
+        return NextResponse.json(invoice.toJSON());
 
     } catch (error: any) {
         console.error("Invoice Creation Error:", error);
